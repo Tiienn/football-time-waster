@@ -169,6 +169,23 @@ export default function App() {
     link.click();
   };
 
+  const getTweetText = () => {
+    const lines = [
+      `⏱️ ${matchInfo.home} vs ${matchInfo.away} | ${matchInfo.half}`,
+      `${incidentCount} incidents · ${formatTime(totalWasted)} wasted (${wastedPct}% of ${matchMinutes}min)`,
+      `🏠 ${matchInfo.home}: ${formatTime(homeWasted)} | ✈️ ${matchInfo.away}: ${formatTime(awayWasted)}`,
+      ``,
+      `#FootballStats #TimeWasting`,
+      `timewasted.live`,
+    ];
+    return lines.join("\n");
+  };
+
+  const shareOnTwitter = () => {
+    const text = encodeURIComponent(getTweetText());
+    window.open(`https://twitter.com/intent/tweet?text=${text}`, "_blank", "noopener,noreferrer");
+  };
+
   const downloadImage = async () => {
     if (!shareCardRef.current) return;
     const canvas = await html2canvas(shareCardRef.current, { backgroundColor: "#0a0a0f", scale: 2 });
@@ -176,6 +193,14 @@ export default function App() {
     link.download = `${matchInfo.home}-vs-${matchInfo.away}-time-wasted.png`;
     link.href = canvas.toDataURL();
     link.click();
+    // Prompt to share on Twitter after download
+    setTimeout(() => {
+      const openTwitter = window.confirm("Image downloaded! 🎉\n\nOpen Twitter/X to share it?");
+      if (openTwitter) {
+        const text = encodeURIComponent(getTweetText());
+        window.open(`https://twitter.com/intent/tweet?text=${text}`, "_blank", "noopener,noreferrer");
+      }
+    }, 500);
   };
 
   const runningCat = CATEGORIES.find(c => timers[c.id]?.running);
@@ -488,6 +513,11 @@ export default function App() {
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#555", marginBottom: 8, letterSpacing: 1 }}>TEXT FOR SOCIAL MEDIA</div>
               <pre style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#ccc", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{getSummaryText()}</pre>
             </div>
+
+            <button onClick={shareOnTwitter} style={{ width: "100%", background: "#000", border: "1px solid #333", borderRadius: 10, padding: "14px", color: "#fff", fontSize: 16, cursor: "pointer", fontFamily: "'Bebas Neue', Impact, sans-serif", letterSpacing: 2, transition: "all 0.2s", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.259 5.628 5.905-5.628zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+              POST TO X / TWITTER
+            </button>
 
             <button onClick={downloadImage} style={{ width: "100%", background: "#1a1a2e", border: "1px solid #333", borderRadius: 10, padding: "14px", color: "#fff", fontSize: 16, cursor: "pointer", fontFamily: "'Bebas Neue', Impact, sans-serif", letterSpacing: 2, transition: "all 0.2s", marginBottom: 8 }}>
               📸 DOWNLOAD IMAGE
