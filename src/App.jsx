@@ -476,34 +476,28 @@ export default function App() {
               </div>
               {halfStats.length > 1 && (
                 <div style={{ display: "flex", gap: 20, marginBottom: 24 }}>
-                  {halfStats.map(h => {
-                    const addedMin = h.half === "1st Half" ? (matchInfo.addedTime1 || 0) : h.half === "2nd Half" ? (matchInfo.addedTime2 || 0) : 0;
-                    const addedSec = addedMin * 60;
-                    const pct = addedSec > 0 ? Math.round((h.wasted / addedSec) * 100) : 0;
-                    return (
-                      <div key={h.half} style={{ flex: 1, background: "#0a0a0f", borderRadius: 12, padding: "10px", textAlign: "center" }}>
-                        <div style={{ fontSize: 18, color: "#ccc" }}>{formatTime(h.wasted)}</div>
-                        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#555", marginTop: 2 }}>{h.half}{addedMin > 0 ? ` | +${addedMin} min` : ""}</div>
-                        {addedMin > 0 && <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#ffa502", marginTop: 2 }}>{pct}% of added time wasted</div>}
-                      </div>
-                    );
-                  })}
+                  {halfStats.map(h => (
+                    <div key={h.half} style={{ flex: 1, background: "#0a0a0f", borderRadius: 12, padding: "10px", textAlign: "center" }}>
+                      <div style={{ fontSize: 18, color: "#ccc" }}>{formatTime(h.wasted)}</div>
+                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#555", marginTop: 2 }}>{h.half}</div>
+                    </div>
+                  ))}
                 </div>
               )}
-              {halfStats.length <= 1 && ((matchInfo.addedTime1 || 0) > 0 || (matchInfo.addedTime2 || 0) > 0) && (() => {
-                const currentAdded = halfStats.length === 1
-                  ? (halfStats[0].half === "1st Half" ? (matchInfo.addedTime1 || 0) : halfStats[0].half === "2nd Half" ? (matchInfo.addedTime2 || 0) : 0)
-                  : ((matchInfo.addedTime1 || 0) + (matchInfo.addedTime2 || 0));
-                const currentWasted = halfStats.length === 1 ? halfStats[0].wasted : totalWasted;
-                const pct = currentAdded > 0 ? Math.round((currentWasted / (currentAdded * 60)) * 100) : 0;
-                return currentAdded > 0 ? (
-                  <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
-                    <span style={{ fontSize: 13, color: "#ffa502" }}>+{currentAdded} min added</span>
-                    <span style={{ fontSize: 13, color: "#888" }}> · </span>
-                    <span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{pct}% wasted</span>
-                  </div>
-                ) : null;
-              })()}
+              {((matchInfo.addedTime1 || 0) > 0 || (matchInfo.addedTime2 || 0) > 0) && (
+                <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, fontFamily: "'DM Sans', sans-serif" }}>
+                  {(matchInfo.addedTime1 || 0) > 0 && (() => {
+                    const w = events.filter(e => e.wasting && e.half === "1st Half").reduce((a, e) => a + (e.duration || 0), 0);
+                    const pct = Math.round((w / ((matchInfo.addedTime1 || 0) * 60)) * 100);
+                    return <div style={{ textAlign: "center", marginBottom: (matchInfo.addedTime2 || 0) > 0 ? 6 : 0 }}><span style={{ fontSize: 13, color: "#ffa502" }}>1st Half: +{matchInfo.addedTime1} min added</span><span style={{ fontSize: 13, color: "#888" }}> · </span><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted ({pct}%)</span></div>;
+                  })()}
+                  {(matchInfo.addedTime2 || 0) > 0 && (() => {
+                    const w = events.filter(e => e.wasting && e.half === "2nd Half").reduce((a, e) => a + (e.duration || 0), 0);
+                    const pct = Math.round((w / ((matchInfo.addedTime2 || 0) * 60)) * 100);
+                    return <div style={{ textAlign: "center" }}><span style={{ fontSize: 13, color: "#ffa502" }}>2nd Half: +{matchInfo.addedTime2} min added</span><span style={{ fontSize: 13, color: "#888" }}> · </span><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted ({pct}%)</span></div>;
+                  })()}
+                </div>
+              )}
               {totalOther > 0 && (
                 <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
                   <span style={{ fontSize: 13, color: "#888" }}>Other delays (not wasting): </span>
