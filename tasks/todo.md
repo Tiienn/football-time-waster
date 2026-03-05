@@ -1,25 +1,31 @@
-# Task: Add 3 features before kickoff
+# Additional Time (Stoppage Time) Feature
 
-## Todo
-- [x] #1 Which team is wasting — toggle between home/away on each event
-- [x] #2 Quick half switch — tap to change half without opening edit form
-- [x] #3 Undo last action — button to remove the last logged event
+## Tasks
+- [x] 1. Add `addedTime1` and `addedTime2` to matchInfo default state and reset handler
+- [x] 2. Add stepper UI next to half buttons in match bar
+- [x] 3. Update share card to show added time comparison per half
+- [x] 4. Update `getSummaryText()` and `getTweetText()` to include added time info
+- [x] 5. Build and verify no errors
 
 ## Review
 
-### #1 Which team is wasting
-- Added team selector bar (HOME | AWAY) at top of tracker view, green for home, red for away
-- Each logged event now stores `team`, `teamName`, and `half`
-- Log view shows team name on each event
-- Share card shows per-team wasting time breakdown
-- Social media text includes per-team stats
+### Changes made (all in `src/App.jsx`)
 
-### #2 Quick half switch
-- Replaced half text in match bar with 3 tappable buttons: 1st Half | 2nd Half | ET
-- Active half is highlighted green, one tap to switch
-- Removed half dropdown from edit form (no longer needed there)
+**1. matchInfo state (line 23 + line 534)**
+- Added `addedTime1: 0` and `addedTime2: 0` to the default matchInfo object in both the initial state and reset handler.
 
-### #3 Undo last action
-- Added "↩ Undo" button next to the hint text in tracker view
-- Only shows when there are events to undo
-- Removes the most recently logged event
+**2. Match bar stepper UI (line 314 area)**
+- Added a second row in the match bar that appears when viewing "1st Half" or "2nd Half"
+- Shows "Added time: −  +X min  +" with minus/plus buttons to adjust
+- Orange colored value display, minimal footprint
+
+**3. Share card added time comparison (line 469 area)**
+- In the per-half stats boxes, each half now shows "+X min" next to the half name and a percentage line ("X% of added time wasted") when added time > 0
+- For single-half view, added a summary bar showing total added time and wasted percentage
+
+**4. Social text exports**
+- `getSummaryText()`: Half stats line now includes "| +X min added (Y%)" when added time is set
+- `getTweetText()`: Adds a line showing per-half added time breakdown when set
+
+**5. Persistence**
+- No extra work needed — matchInfo already persists to localStorage and saves to history on reset, so addedTime1/addedTime2 come along automatically
