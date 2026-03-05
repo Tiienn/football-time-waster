@@ -4,12 +4,14 @@ import html2canvas from "html2canvas";
 const CATEGORIES = [
   { id: "gk", label: "Goal Kick Delay", icon: "🧤", color: "#00ff87" },
   { id: "corner", label: "Corner Kick Delay", icon: "🚩", color: "#e17055" },
-  { id: "freekick", label: "Set Piece Delay", icon: "⚽", color: "#1e90ff" },
+  { id: "freekick", label: "Free Kick Delay", icon: "⚽", color: "#1e90ff" },
   { id: "throwin", label: "Throw In Delay", icon: "🤾", color: "#fd79a8" },
   { id: "injury", label: "Injury Delay", icon: "🩹", color: "#ff4757" },
-  { id: "ref", label: "Referee Delay", icon: "🟨", color: "#fdcb6e" },
-  { id: "var", label: "VAR Check", icon: "📺", color: "#a29bfe" },
+  { id: "penalty", label: "Penalty Delay", icon: "🥅", color: "#e056fd" },
+  { id: "ref", label: "Referee Delay", icon: "🟨", color: "#fdcb6e", defaultNotWasting: true },
+  { id: "var", label: "VAR Check", icon: "📺", color: "#a29bfe", defaultNotWasting: true },
   { id: "sub", label: "Sub Delay", icon: "🔄", color: "#ffa502" },
+  { id: "celebration", label: "Celebration", icon: "🎉", color: "#f9ca24", defaultNotWasting: true },
   { id: "other", label: "Other Wasting", icon: "⏱️", color: "#b2bec3" },
 ];
 
@@ -20,7 +22,7 @@ const loadSaved = (key, fallback) => { try { const v = localStorage.getItem(key)
 export default function App() {
   const [events, setEvents] = useState(() => loadSaved("tw_events", []));
   const [timers, setTimers] = useState({});
-  const [matchInfo, setMatchInfo] = useState(() => loadSaved("tw_matchInfo", { home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0, goals: [] }));
+  const [matchInfo, setMatchInfo] = useState(() => loadSaved("tw_matchInfo", { home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0, goals: [], redCards: [] }));
   const [view, setView] = useState("tracker");
   const [matchHistory, setMatchHistory] = useState(() => loadSaved("tw_history", []));
   const [viewingHistoryIdx, setViewingHistoryIdx] = useState(null);
@@ -67,7 +69,7 @@ export default function App() {
       vibrate([50, 30, 50]);
       const elapsed = timers[cat.id]?.elapsed || 0;
       clearInterval(intervals.current[cat.id]);
-      updateEvents(prev => [...prev, { id: Date.now(), catId: cat.id, label: cat.label, icon: cat.icon, color: cat.color, duration: elapsed, wasting: true, team: selectedTeam, teamName: selectedTeam === "home" ? matchInfo.home : matchInfo.away, half: matchInfo.half, matchMinute: matchClock ? matchElapsed : null, time: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) }]);
+      updateEvents(prev => [...prev, { id: Date.now(), catId: cat.id, label: cat.label, icon: cat.icon, color: cat.color, duration: elapsed, wasting: !cat.defaultNotWasting, team: selectedTeam, teamName: selectedTeam === "home" ? matchInfo.home : matchInfo.away, half: matchInfo.half, matchMinute: matchClock ? matchElapsed : null, time: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) }]);
       setTimers(prev => ({ ...prev, [cat.id]: { elapsed: 0, running: false } }));
     } else {
       vibrate(30);
@@ -116,6 +118,8 @@ export default function App() {
 
   const totalWasted = events.filter(e => e.wasting).reduce((acc, e) => acc + (e.duration || 0), 0);
   const totalOther = events.filter(e => !e.wasting).reduce((acc, e) => acc + (e.duration || 0), 0);
+  const totalOfficial = events.filter(e => !e.wasting && e.catId !== "celebration").reduce((acc, e) => acc + (e.duration || 0), 0);
+  const totalCelebration = events.filter(e => e.catId === "celebration").reduce((acc, e) => acc + (e.duration || 0), 0);
   const incidentCount = events.length;
   const homeWasted = events.filter(e => e.wasting && e.team === "home").reduce((acc, e) => acc + (e.duration || 0), 0);
   const awayWasted = events.filter(e => e.wasting && e.team === "away").reduce((acc, e) => acc + (e.duration || 0), 0);
@@ -129,7 +133,7 @@ export default function App() {
     return { ...cat, count: catEvents.length, total: catEvents.reduce((a, e) => a + (e.duration || 0), 0) };
   }).filter(c => c.count > 0);
 
-  const catNotWasting = CATEGORIES.map(cat => {
+  const catNotWasting = CATEGORIES.filter(c => c.id !== "celebration").map(cat => {
     const catEvents = events.filter(e => e.catId === cat.id && !e.wasting);
     return { ...cat, count: catEvents.length, total: catEvents.reduce((a, e) => a + (e.duration || 0), 0) };
   }).filter(c => c.count > 0);
@@ -141,38 +145,59 @@ export default function App() {
     const scoreLine = `${homeGoals}-${awayGoals}`;
     const teamName = goal.team === "home" ? matchInfo.home : matchInfo.away;
     const minuteDisplay = goal.minute != null ? Math.floor(goal.minute / 60) : null;
-    const nextGoal = goals[i + 1];
-    const wastedAfter = events.filter(e => {
+    const isEqualizer = homeGoals === awayGoals;
+    const wastedAfter = isEqualizer ? 0 : events.filter(e => {
       if (!e.wasting || e.team !== goal.team) return false;
-      if (goal.minute != null && e.matchMinute != null) {
-        const start = goal.minute;
-        const end = nextGoal?.minute != null ? nextGoal.minute : Infinity;
-        return e.matchMinute >= start && e.matchMinute < end;
-      }
-      const start = goal.time;
-      const end = nextGoal?.time || Infinity;
-      return e.id >= start && e.id < end;
+      if (goal.minute != null && e.matchMinute != null) return e.matchMinute >= goal.minute;
+      return e.id >= goal.time;
     }).reduce((a, e) => a + (e.duration || 0), 0);
     return { ...goal, homeGoals, awayGoals, scoreLine, teamName, minuteDisplay, wastedAfter };
   });
 
+  const redCards = matchInfo.redCards || [];
+  const redCardTimeline = redCards.map((card, i) => {
+    const teamName = card.team === "home" ? matchInfo.home : matchInfo.away;
+    const minuteDisplay = card.minute != null ? Math.floor(card.minute / 60) : null;
+    const menCount = 11 - redCards.slice(0, i + 1).filter(c => c.team === card.team).length;
+    const goalsAtTime = goals.filter(g => {
+      if (card.minute != null && g.minute != null) return g.minute <= card.minute;
+      return g.time <= card.time;
+    });
+    const homeScore = goalsAtTime.filter(g => g.team === "home").length;
+    const awayScore = goalsAtTime.filter(g => g.team === "away").length;
+    const scoreLine = `${homeScore}-${awayScore}`;
+    const wastedAfter = events.filter(e => {
+      if (!e.wasting || e.team !== card.team) return false;
+      if (card.minute != null && e.matchMinute != null) return e.matchMinute >= card.minute;
+      return e.id >= card.time;
+    }).reduce((a, e) => a + (e.duration || 0), 0);
+    return { ...card, teamName, minuteDisplay, menCount, scoreLine, wastedAfter };
+  });
+
+  const halfLabel = halfStats.some(h => h.half === "1st Half") && halfStats.some(h => h.half === "2nd Half") ? "Full Match" : matchInfo.half;
+  const totalAddedMin = (matchInfo.addedTime1 || 0) + (matchInfo.addedTime2 || 0);
+  const homeShort = matchInfo.home.split(" ")[0].slice(0, 3).toUpperCase();
+  const awayShort = matchInfo.away.split(" ")[0].slice(0, 3).toUpperCase();
+
   const getSummaryText = () => {
     const lines = [
       `⏱️ TIME WASTING TRACKER`,
-      `${matchInfo.home} vs ${matchInfo.away} | ${matchInfo.half}`,
+      `${matchInfo.home} vs ${matchInfo.away} | ${halfLabel}`,
       ``,
-      `📊 TOTAL: ${incidentCount} incidents | ${formatTime(totalWasted)} wasted (${wastedPct}% of ${matchMinutes}min)${totalOther > 0 ? ` | ${formatTime(totalOther)} other delays` : ""}`,
-      `🏠 ${matchInfo.home}: ${formatTime(homeWasted)} | 🏟️ ${matchInfo.away}: ${formatTime(awayWasted)}`,
-      ...(halfStats.length > 1 ? [halfStats.map(h => {
+      `📊 TOTAL: ${formatTime(totalWasted)} delays (${wastedPct}% of ${matchMinutes}min)${totalOfficial > 0 ? ` | ${formatTime(totalOfficial)} official delays` : ""}`,
+      ...halfStats.map(h => {
         const am = h.half === "1st Half" ? (matchInfo.addedTime1 || 0) : h.half === "2nd Half" ? (matchInfo.addedTime2 || 0) : 0;
-        return `${h.half}: ${formatTime(h.wasted)} wasted${am > 0 ? ` but only +${am} min added` : ""}`;
-      }).join(" · ")] : []),
+        return `${h.half}: ${formatTime(h.wasted)} delays${am > 0 ? ` but only +${am} min added` : ""}`;
+      }),
       ``,
-      ...catSummary.map(c => `${c.icon} ${c.label}: ${c.count}x${c.total > 0 ? ` (${formatTime(c.total)})` : ""}`),
-      ...(catNotWasting.length > 0 ? [``, `Not wasting:`, ...catNotWasting.map(c => `${c.icon} ${c.label}: ${c.count}x${c.total > 0 ? ` (${formatTime(c.total)})` : ""}`)] : []),
+      ...catSummary.map(c => `${c.icon} ${c.label}: ${formatTime(c.total)}`),
+      ...(catNotWasting.length > 0 ? [``, `Official delays:`, ...catNotWasting.map(c => `${c.icon} ${c.label}: ${formatTime(c.total)}`)] : []),
+      ...(totalCelebration > 0 ? [``, `🎉 Celebration: ${formatTime(totalCelebration)}`] : []),
       ...(goalTimeline.length > 0 ? [``, `⚽ GOALS:`, ...goalTimeline.map(g => `⚽ ${g.scoreLine} ${g.teamName}${g.minuteDisplay != null ? ` (${g.minuteDisplay}')` : ""}${g.wastedAfter > 0 ? ` — ${formatTime(g.wastedAfter)} wasted after scoring` : ""}`)] : []),
+      ...(redCardTimeline.length > 0 ? [``, `🟥 RED CARDS:`, ...redCardTimeline.map(c => `🟥 ${c.teamName} (${c.menCount} men)${c.wastedAfter > 0 ? ` — ${formatTime(c.wastedAfter)} wasted` : ""}${c.scoreLine !== "0-0" ? `. ${c.scoreLine}.` : ""}`)] : []),
       ``,
-      `#FootballStats #TimeWasting #${matchInfo.home.replace(/\s/g,"")}vs${matchInfo.away.replace(/\s/g,"")}`,
+      ...(totalAddedMin > 0 ? [`${wastedPct}% of this match was pure delay. Only ${totalAddedMin} added minutes for ${Math.floor(totalWasted / 60)}+ min of stoppages.`, ``] : []),
+      `#${homeShort}${awayShort} #${matchInfo.home.split(" ")[0]} #${matchInfo.away.split(" ")[0]} #TimeWasting #FootballStats`,
     ];
     return lines.join("\n");
   };
@@ -198,16 +223,16 @@ export default function App() {
   const getTweetText = () => {
     const addedTimeParts = halfStats.map(h => {
       const am = h.half === "1st Half" ? (matchInfo.addedTime1 || 0) : h.half === "2nd Half" ? (matchInfo.addedTime2 || 0) : 0;
-      return am > 0 ? `${h.half}: ${formatTime(h.wasted)} wasted but only +${am}min added` : null;
+      return am > 0 ? `${h.half}: ${formatTime(h.wasted)} delays but only +${am}min added` : null;
     }).filter(Boolean);
     const lines = [
-      `⏱️ ${matchInfo.home} vs ${matchInfo.away} | ${matchInfo.half}`,
-      `${incidentCount} incidents · ${formatTime(totalWasted)} wasted (${wastedPct}% of ${matchMinutes}min)`,
-      `🏠 ${matchInfo.home}: ${formatTime(homeWasted)} | ✈️ ${matchInfo.away}: ${formatTime(awayWasted)}`,
-      ...(addedTimeParts.length > 0 ? [addedTimeParts.join(" · ")] : []),
+      `⏱️ ${matchInfo.home} vs ${matchInfo.away} | ${halfLabel}`,
+      `${formatTime(totalWasted)} delays (${wastedPct}% of ${matchMinutes}min)${totalOfficial > 0 ? ` | ${formatTime(totalOfficial)} official delays` : ""}`,
+      ...(addedTimeParts.length > 0 ? addedTimeParts : []),
       ...(goalTimeline.length > 0 ? goalTimeline.map(g => `⚽ ${g.scoreLine} ${g.teamName}${g.minuteDisplay != null ? ` (${g.minuteDisplay}')` : ""}${g.wastedAfter > 0 ? ` — ${formatTime(g.wastedAfter)} wasted after` : ""}`) : []),
+      ...(redCardTimeline.length > 0 ? redCardTimeline.map(c => `🟥 ${c.teamName} (${c.menCount} men)${c.wastedAfter > 0 ? ` — ${formatTime(c.wastedAfter)} wasted` : ""}`) : []),
       ``,
-      `#FootballStats #TimeWasting`,
+      `#${homeShort}${awayShort} #${matchInfo.home.split(" ")[0]} #${matchInfo.away.split(" ")[0]} #TimeWasting`,
       `timewasted.live`,
     ];
     return lines.join("\n");
@@ -355,7 +380,7 @@ export default function App() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {[["1st Half", 0], ["2nd Half", 2700], ["ET", 5400]].map(([h, offset]) => (
-                  <button key={h} onClick={() => { setMatchInfo(p => ({ ...p, half: h })); if (matchClock) setMatchClock({ startedAt: Date.now(), offset }); }} style={{ background: matchInfo.half === h ? "#00ff87" : "transparent", border: "1px solid " + (matchInfo.half === h ? "#00ff87" : "#333"), borderRadius: 6, color: matchInfo.half === h ? "#000" : "#666", fontSize: 11, padding: "4px 8px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>{h}</button>
+                  <button key={h} onClick={() => { setMatchInfo(p => ({ ...p, half: h })); if (matchClock) setMatchClock({ startedAt: Date.now(), offset }); else setMatchElapsed(offset); }} style={{ background: matchInfo.half === h ? "#00ff87" : "transparent", border: "1px solid " + (matchInfo.half === h ? "#00ff87" : "#333"), borderRadius: 6, color: matchInfo.half === h ? "#000" : "#666", fontSize: 11, padding: "4px 8px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>{h}</button>
                 ))}
                 <button onClick={() => { setTempMatch(matchInfo); setEditingMatch(true); }} style={{ background: "none", border: "1px solid #333", borderRadius: 6, color: "#666", fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", marginLeft: 4 }}>Edit</button>
               </div>
@@ -371,11 +396,26 @@ export default function App() {
             {/* Goal buttons */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
               <button onClick={() => setMatchInfo(p => ({ ...p, goals: [...(p.goals || []), { team: "home", minute: matchClock ? matchElapsed : null, half: p.half, time: Date.now() }] }))} style={{ background: "rgba(0,255,135,0.1)", border: "1px solid #00ff87", borderRadius: 6, color: "#00ff87", fontSize: 11, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>⚽ {matchInfo.home}</button>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 16, color: "#fff", fontWeight: 700, minWidth: 40, textAlign: "center" }}>{(matchInfo.goals || []).filter(g => g.team === "home").length} - {(matchInfo.goals || []).filter(g => g.team === "away").length}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button onClick={() => setMatchInfo(p => { const idx = (p.goals || []).findLastIndex(g => g.team === "home"); return idx >= 0 ? { ...p, goals: (p.goals || []).filter((_, i) => i !== idx) } : p; })} style={{ background: "none", border: "1px solid #333", borderRadius: 4, color: "#888", fontSize: 13, width: 20, height: 20, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>−</button>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 16, color: "#fff", fontWeight: 700, minWidth: 24, textAlign: "center" }}>{(matchInfo.goals || []).filter(g => g.team === "home").length}</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 16, color: "#555" }}>-</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 16, color: "#fff", fontWeight: 700, minWidth: 24, textAlign: "center" }}>{(matchInfo.goals || []).filter(g => g.team === "away").length}</span>
+                <button onClick={() => setMatchInfo(p => { const idx = (p.goals || []).findLastIndex(g => g.team === "away"); return idx >= 0 ? { ...p, goals: (p.goals || []).filter((_, i) => i !== idx) } : p; })} style={{ background: "none", border: "1px solid #333", borderRadius: 4, color: "#888", fontSize: 13, width: 20, height: 20, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>−</button>
+              </div>
               <button onClick={() => setMatchInfo(p => ({ ...p, goals: [...(p.goals || []), { team: "away", minute: matchClock ? matchElapsed : null, half: p.half, time: Date.now() }] }))} style={{ background: "rgba(255,71,87,0.1)", border: "1px solid #ff4757", borderRadius: 6, color: "#ff4757", fontSize: 11, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>⚽ {matchInfo.away}</button>
-              {(matchInfo.goals || []).length > 0 && (
-                <button onClick={() => setMatchInfo(p => ({ ...p, goals: (p.goals || []).slice(0, -1) }))} style={{ background: "none", border: "1px solid #555", borderRadius: 4, color: "#888", fontSize: 11, padding: "3px 6px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>✕</button>
-              )}
+            </div>
+            {/* Red card buttons */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 6 }}>
+              <button onClick={() => setMatchInfo(p => ({ ...p, redCards: [...(p.redCards || []), { team: "home", minute: matchClock ? matchElapsed : null, half: p.half, time: Date.now() }] }))} style={{ background: "rgba(255,71,87,0.08)", border: "1px solid #ff4757", borderRadius: 6, color: "#ff4757", fontSize: 11, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>🟥 {matchInfo.home}</button>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button onClick={() => setMatchInfo(p => { const idx = (p.redCards || []).findLastIndex(g => g.team === "home"); return idx >= 0 ? { ...p, redCards: (p.redCards || []).filter((_, i) => i !== idx) } : p; })} style={{ background: "none", border: "1px solid #333", borderRadius: 4, color: "#888", fontSize: 13, width: 20, height: 20, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>−</button>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: "#ff4757", fontWeight: 700, minWidth: 20, textAlign: "center" }}>{(matchInfo.redCards || []).filter(g => g.team === "home").length}</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: "#555" }}>-</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: "#ff4757", fontWeight: 700, minWidth: 20, textAlign: "center" }}>{(matchInfo.redCards || []).filter(g => g.team === "away").length}</span>
+                <button onClick={() => setMatchInfo(p => { const idx = (p.redCards || []).findLastIndex(g => g.team === "away"); return idx >= 0 ? { ...p, redCards: (p.redCards || []).filter((_, i) => i !== idx) } : p; })} style={{ background: "none", border: "1px solid #333", borderRadius: 4, color: "#888", fontSize: 13, width: 20, height: 20, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>−</button>
+              </div>
+              <button onClick={() => setMatchInfo(p => ({ ...p, redCards: [...(p.redCards || []), { team: "away", minute: matchClock ? matchElapsed : null, half: p.half, time: Date.now() }] }))} style={{ background: "rgba(255,71,87,0.08)", border: "1px solid #ff4757", borderRadius: 6, color: "#ff4757", fontSize: 11, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>🟥 {matchInfo.away}</button>
             </div>
           </>
         ) : (
@@ -423,7 +463,7 @@ export default function App() {
                     <div style={{ fontSize: 28 }}>{cat.icon}</div>
                     <div style={{ fontSize: 13, fontFamily: "'DM Sans', sans-serif", fontWeight: 600, color: running ? cat.color : "#ccc", marginTop: 4 }}>{cat.label}</div>
                     {running && <div style={{ fontSize: 20, color: cat.color, marginTop: 4 }}>{formatTime(t.elapsed || 0)}</div>}
-                    {running && <button onClick={(e) => { e.stopPropagation(); cancelTimer(cat.id); }} style={{ position: "absolute", top: 6, left: 8, background: "rgba(255,71,87,0.2)", border: "1px solid #ff4757", borderRadius: 4, color: "#ff4757", fontSize: 10, padding: "1px 5px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>✕</button>}
+                    {running && <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); e.preventDefault(); cancelTimer(cat.id); }} style={{ position: "absolute", top: 6, left: 8, background: "rgba(255,71,87,0.2)", border: "1px solid #ff4757", borderRadius: 4, color: "#ff4757", fontSize: 10, padding: "1px 5px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>✕</button>}
                   </div>
                 );
               })}
@@ -485,16 +525,16 @@ export default function App() {
               <div style={{ fontSize: 26, letterSpacing: 2, marginBottom: 4 }}>
                 {matchInfo.home} <span style={{ color: "#333" }}>vs</span> {matchInfo.away}
               </div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", color: "#555", fontSize: 13, marginBottom: 20 }}>{matchInfo.half}</div>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", color: "#555", fontSize: 13, marginBottom: 20 }}>{halfLabel}</div>
 
               <div style={{ display: "flex", gap: 20, marginBottom: 24 }}>
                 <div style={{ flex: 1, background: "#0a0a0f", borderRadius: 12, padding: "16px", textAlign: "center" }}>
                   <div style={{ fontSize: 36, color: "#00ff87" }}>{formatTime(totalWasted)}</div>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#555", marginTop: 4 }}>TIME WASTED ({wastedPct}% of {matchMinutes}min)</div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#555", marginTop: 4 }}>DELAYS ({wastedPct}% of {matchMinutes}min)</div>
                 </div>
                 <div style={{ flex: 1, background: "#0a0a0f", borderRadius: 12, padding: "16px", textAlign: "center" }}>
-                  <div style={{ fontSize: 36, color: "#ffa502" }}>{incidentCount}</div>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#555", marginTop: 4 }}>INCIDENTS</div>
+                  <div style={{ fontSize: 36, color: "#ffa502" }}>{formatTime(totalOfficial)}</div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#555", marginTop: 4 }}>OFFICIAL DELAYS</div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 20, marginBottom: 24 }}>
@@ -521,11 +561,11 @@ export default function App() {
                 <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, fontFamily: "'DM Sans', sans-serif" }}>
                   {(matchInfo.addedTime1 || 0) > 0 && (() => {
                     const w = events.filter(e => e.wasting && e.half === "1st Half").reduce((a, e) => a + (e.duration || 0), 0);
-                    return <div style={{ textAlign: "center", marginBottom: (matchInfo.addedTime2 || 0) > 0 ? 6 : 0 }}><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted in 1st Half</span><span style={{ fontSize: 13, color: "#888" }}> but only </span><span style={{ fontSize: 13, color: "#ffa502", fontWeight: 700 }}>+{matchInfo.addedTime1} min added</span></div>;
+                    return <div style={{ textAlign: "center", marginBottom: (matchInfo.addedTime2 || 0) > 0 ? 6 : 0 }}><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} delays in 1st Half</span><span style={{ fontSize: 13, color: "#888" }}> but only </span><span style={{ fontSize: 13, color: "#ffa502", fontWeight: 700 }}>+{matchInfo.addedTime1} min added</span></div>;
                   })()}
                   {(matchInfo.addedTime2 || 0) > 0 && (() => {
                     const w = events.filter(e => e.wasting && e.half === "2nd Half").reduce((a, e) => a + (e.duration || 0), 0);
-                    return <div style={{ textAlign: "center" }}><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted in 2nd Half</span><span style={{ fontSize: 13, color: "#888" }}> but only </span><span style={{ fontSize: 13, color: "#ffa502", fontWeight: 700 }}>+{matchInfo.addedTime2} min added</span></div>;
+                    return <div style={{ textAlign: "center" }}><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} delays in 2nd Half</span><span style={{ fontSize: 13, color: "#888" }}> but only </span><span style={{ fontSize: 13, color: "#ffa502", fontWeight: 700 }}>+{matchInfo.addedTime2} min added</span></div>;
                   })()}
                 </div>
               )}
@@ -543,10 +583,24 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {totalOther > 0 && (
+              {redCardTimeline.length > 0 && (
+                <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, fontFamily: "'DM Sans', sans-serif" }}>
+                  <div style={{ fontSize: 11, color: "#555", letterSpacing: 1, marginBottom: 8 }}>RED CARDS & TIME WASTING</div>
+                  {redCardTimeline.map((c, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: i < redCardTimeline.length - 1 ? 6 : 0, fontSize: 13 }}>
+                      <span>🟥</span>
+                      <span style={{ color: c.team === "home" ? "#00ff87" : "#ff4757", fontWeight: 700 }}>{c.teamName}</span>
+                      <span style={{ color: "#888" }}>({c.menCount} men)</span>
+                      {c.wastedAfter > 0 && <span style={{ color: "#ffa502", marginLeft: "auto" }}>{formatTime(c.wastedAfter)} wasted</span>}
+                      {c.scoreLine !== "0-0" && <span style={{ color: "#888" }}>{c.scoreLine}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {totalOfficial > 0 && (
                 <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, textAlign: "center", fontFamily: "'DM Sans', sans-serif" }}>
-                  <span style={{ fontSize: 13, color: "#888" }}>Other delays (not wasting): </span>
-                  <span style={{ fontSize: 13, color: "#aaa", fontWeight: 700 }}>{formatTime(totalOther)}</span>
+                  <span style={{ fontSize: 13, color: "#888" }}>Official delays: </span>
+                  <span style={{ fontSize: 13, color: "#aaa", fontWeight: 700 }}>{formatTime(totalOfficial)}</span>
                 </div>
               )}
 
@@ -557,10 +611,10 @@ export default function App() {
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                       <span style={{ fontSize: 13, color: "#ccc" }}>{c.label}</span>
-                      <span style={{ fontSize: 13, color: c.color, fontWeight: 700 }}>{c.count}x {c.total > 0 ? `· ${formatTime(c.total)}` : ""}</span>
+                      <span style={{ fontSize: 13, color: c.color, fontWeight: 700 }}>{formatTime(c.total)}</span>
                     </div>
                     <div style={{ height: 4, background: "#1a1a2e", borderRadius: 2 }}>
-                      <div style={{ height: "100%", borderRadius: 2, background: c.color, width: `${Math.min(100, (c.count / Math.max(...catSummary.map(x => x.count))) * 100)}%`, transition: "width 0.5s" }} />
+                      <div style={{ height: "100%", borderRadius: 2, background: c.color, width: `${Math.min(100, (c.total / Math.max(...catSummary.map(x => x.total), 1)) * 100)}%`, transition: "width 0.5s" }} />
                     </div>
                   </div>
                 </div>
@@ -568,14 +622,23 @@ export default function App() {
 
               {catNotWasting.length > 0 && (
                 <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #1a1a2e" }}>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#555", marginBottom: 10, letterSpacing: 0.5 }}>NOT WASTING</div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#555", marginBottom: 10, letterSpacing: 0.5 }}>OFFICIAL DELAYS</div>
                   {catNotWasting.map(c => (
                     <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, fontFamily: "'DM Sans', sans-serif" }}>
                       <span style={{ fontSize: 18 }}>{c.icon}</span>
                       <span style={{ fontSize: 13, color: "#888" }}>{c.label}</span>
-                      <span style={{ fontSize: 13, color: "#666", marginLeft: "auto" }}>{c.count}x {c.total > 0 ? `· ${formatTime(c.total)}` : ""}</span>
+                      <span style={{ fontSize: 13, color: "#666", marginLeft: "auto" }}>{formatTime(c.total)}</span>
                     </div>
                   ))}
+                </div>
+              )}
+              {totalCelebration > 0 && (
+                <div style={{ marginTop: catNotWasting.length > 0 ? 8 : 20, paddingTop: catNotWasting.length > 0 ? 0 : 16, borderTop: catNotWasting.length > 0 ? "none" : "1px solid #1a1a2e" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: "'DM Sans', sans-serif" }}>
+                    <span style={{ fontSize: 18 }}>🎉</span>
+                    <span style={{ fontSize: 13, color: "#888" }}>Celebration</span>
+                    <span style={{ fontSize: 13, color: "#f9ca24", marginLeft: "auto" }}>{formatTime(totalCelebration)}</span>
+                  </div>
                 </div>
               )}
 
@@ -608,7 +671,7 @@ export default function App() {
               📊 EXPORT CSV
             </button>
 
-            <button onClick={() => { if (events.length > 0 && !confirm("Reset all data and start a new match?")) return; if (events.length > 0) setMatchHistory(prev => [{ matchInfo, events, date: new Date().toISOString() }, ...prev]); setEvents([]); setTimers({}); setHistory([]); setFuture([]); setMatchClock(null); setMatchElapsed(0); setMatchInfo({ home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0, goals: [] }); setView("tracker"); }} style={{ width: "100%", background: "transparent", border: "1px solid #ff4757", borderRadius: 10, padding: "12px", color: "#ff4757", fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600, marginTop: 10 }}>
+            <button onClick={() => { if (events.length > 0 && !confirm("Reset all data and start a new match?")) return; if (events.length > 0) setMatchHistory(prev => [{ matchInfo, events, date: new Date().toISOString() }, ...prev]); setEvents([]); setTimers({}); setHistory([]); setFuture([]); setMatchClock(null); setMatchElapsed(0); setMatchInfo({ home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0, goals: [], redCards: [] }); setView("tracker"); }} style={{ width: "100%", background: "transparent", border: "1px solid #ff4757", borderRadius: 10, padding: "12px", color: "#ff4757", fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600, marginTop: 10 }}>
               🗑 Reset & New Match
             </button>
           </>
@@ -627,7 +690,7 @@ export default function App() {
                     <div key={i} className="event-row" style={{ cursor: "pointer" }} onClick={() => setViewingHistoryIdx(i)}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600, color: "#ccc", fontSize: 14 }}>{m.matchInfo.home} vs {m.matchInfo.away}</div>
-                        <div style={{ color: "#555", fontSize: 11 }}>{new Date(m.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {mCount} incidents · {formatTime(mWasted)} wasted</div>
+                        <div style={{ color: "#555", fontSize: 11 }}>{new Date(m.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} · {mCount} incidents · {formatTime(mWasted)} delays</div>
                       </div>
                       <span style={{ color: "#444", fontSize: 16 }}>›</span>
                     </div>
