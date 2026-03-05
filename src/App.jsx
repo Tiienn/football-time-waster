@@ -20,7 +20,7 @@ const loadSaved = (key, fallback) => { try { const v = localStorage.getItem(key)
 export default function App() {
   const [events, setEvents] = useState(() => loadSaved("tw_events", []));
   const [timers, setTimers] = useState({});
-  const [matchInfo, setMatchInfo] = useState(() => loadSaved("tw_matchInfo", { home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0 }));
+  const [matchInfo, setMatchInfo] = useState(() => loadSaved("tw_matchInfo", { home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0, goals: [] }));
   const [view, setView] = useState("tracker");
   const [matchHistory, setMatchHistory] = useState(() => loadSaved("tw_history", []));
   const [viewingHistoryIdx, setViewingHistoryIdx] = useState(null);
@@ -134,6 +134,28 @@ export default function App() {
     return { ...cat, count: catEvents.length, total: catEvents.reduce((a, e) => a + (e.duration || 0), 0) };
   }).filter(c => c.count > 0);
 
+  const goals = matchInfo.goals || [];
+  const goalTimeline = goals.map((goal, i) => {
+    const homeGoals = goals.slice(0, i + 1).filter(g => g.team === "home").length;
+    const awayGoals = goals.slice(0, i + 1).filter(g => g.team === "away").length;
+    const scoreLine = `${homeGoals}-${awayGoals}`;
+    const teamName = goal.team === "home" ? matchInfo.home : matchInfo.away;
+    const minuteDisplay = goal.minute != null ? Math.floor(goal.minute / 60) : null;
+    const nextGoal = goals[i + 1];
+    const wastedAfter = events.filter(e => {
+      if (!e.wasting || e.team !== goal.team) return false;
+      if (goal.minute != null && e.matchMinute != null) {
+        const start = goal.minute;
+        const end = nextGoal?.minute != null ? nextGoal.minute : Infinity;
+        return e.matchMinute >= start && e.matchMinute < end;
+      }
+      const start = goal.time;
+      const end = nextGoal?.time || Infinity;
+      return e.id >= start && e.id < end;
+    }).reduce((a, e) => a + (e.duration || 0), 0);
+    return { ...goal, homeGoals, awayGoals, scoreLine, teamName, minuteDisplay, wastedAfter };
+  });
+
   const getSummaryText = () => {
     const lines = [
       `⏱️ TIME WASTING TRACKER`,
@@ -143,11 +165,12 @@ export default function App() {
       `🏠 ${matchInfo.home}: ${formatTime(homeWasted)} | 🏟️ ${matchInfo.away}: ${formatTime(awayWasted)}`,
       ...(halfStats.length > 1 ? [halfStats.map(h => {
         const am = h.half === "1st Half" ? (matchInfo.addedTime1 || 0) : h.half === "2nd Half" ? (matchInfo.addedTime2 || 0) : 0;
-        return `${h.half}: ${formatTime(h.wasted)} wasted${am > 0 ? ` | +${am} min added (${Math.round((h.wasted / (am * 60)) * 100)}%)` : ""}`;
+        return `${h.half}: ${formatTime(h.wasted)} wasted${am > 0 ? ` but only +${am} min added` : ""}`;
       }).join(" · ")] : []),
       ``,
       ...catSummary.map(c => `${c.icon} ${c.label}: ${c.count}x${c.total > 0 ? ` (${formatTime(c.total)})` : ""}`),
       ...(catNotWasting.length > 0 ? [``, `Not wasting:`, ...catNotWasting.map(c => `${c.icon} ${c.label}: ${c.count}x${c.total > 0 ? ` (${formatTime(c.total)})` : ""}`)] : []),
+      ...(goalTimeline.length > 0 ? [``, `⚽ GOALS:`, ...goalTimeline.map(g => `⚽ ${g.scoreLine} ${g.teamName}${g.minuteDisplay != null ? ` (${g.minuteDisplay}')` : ""}${g.wastedAfter > 0 ? ` — ${formatTime(g.wastedAfter)} wasted after scoring` : ""}`)] : []),
       ``,
       `#FootballStats #TimeWasting #${matchInfo.home.replace(/\s/g,"")}vs${matchInfo.away.replace(/\s/g,"")}`,
     ];
@@ -175,13 +198,14 @@ export default function App() {
   const getTweetText = () => {
     const addedTimeParts = halfStats.map(h => {
       const am = h.half === "1st Half" ? (matchInfo.addedTime1 || 0) : h.half === "2nd Half" ? (matchInfo.addedTime2 || 0) : 0;
-      return am > 0 ? `${h.half}: ${formatTime(h.wasted)} of +${am}min (${Math.round((h.wasted / (am * 60)) * 100)}%)` : null;
+      return am > 0 ? `${h.half}: ${formatTime(h.wasted)} wasted but only +${am}min added` : null;
     }).filter(Boolean);
     const lines = [
       `⏱️ ${matchInfo.home} vs ${matchInfo.away} | ${matchInfo.half}`,
       `${incidentCount} incidents · ${formatTime(totalWasted)} wasted (${wastedPct}% of ${matchMinutes}min)`,
       `🏠 ${matchInfo.home}: ${formatTime(homeWasted)} | ✈️ ${matchInfo.away}: ${formatTime(awayWasted)}`,
       ...(addedTimeParts.length > 0 ? [addedTimeParts.join(" · ")] : []),
+      ...(goalTimeline.length > 0 ? goalTimeline.map(g => `⚽ ${g.scoreLine} ${g.teamName}${g.minuteDisplay != null ? ` (${g.minuteDisplay}')` : ""}${g.wastedAfter > 0 ? ` — ${formatTime(g.wastedAfter)} wasted after` : ""}`) : []),
       ``,
       `#FootballStats #TimeWasting`,
       `timewasted.live`,
@@ -344,6 +368,15 @@ export default function App() {
                 <button onClick={() => setMatchInfo(p => { const key = p.half === "1st Half" ? "addedTime1" : "addedTime2"; return { ...p, [key]: (p[key] || 0) + 1 }; })} style={{ background: "none", border: "1px solid #333", borderRadius: 4, color: "#888", fontSize: 13, width: 24, height: 24, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>+</button>
               </div>
             )}
+            {/* Goal buttons */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 8 }}>
+              <button onClick={() => setMatchInfo(p => ({ ...p, goals: [...(p.goals || []), { team: "home", minute: matchClock ? matchElapsed : null, half: p.half, time: Date.now() }] }))} style={{ background: "rgba(0,255,135,0.1)", border: "1px solid #00ff87", borderRadius: 6, color: "#00ff87", fontSize: 11, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>⚽ {matchInfo.home}</button>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 16, color: "#fff", fontWeight: 700, minWidth: 40, textAlign: "center" }}>{(matchInfo.goals || []).filter(g => g.team === "home").length} - {(matchInfo.goals || []).filter(g => g.team === "away").length}</span>
+              <button onClick={() => setMatchInfo(p => ({ ...p, goals: [...(p.goals || []), { team: "away", minute: matchClock ? matchElapsed : null, half: p.half, time: Date.now() }] }))} style={{ background: "rgba(255,71,87,0.1)", border: "1px solid #ff4757", borderRadius: 6, color: "#ff4757", fontSize: 11, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>⚽ {matchInfo.away}</button>
+              {(matchInfo.goals || []).length > 0 && (
+                <button onClick={() => setMatchInfo(p => ({ ...p, goals: (p.goals || []).slice(0, -1) }))} style={{ background: "none", border: "1px solid #555", borderRadius: 4, color: "#888", fontSize: 11, padding: "3px 6px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>✕</button>
+              )}
+            </div>
           </>
         ) : (
           <div style={{ display: "flex", gap: 8, width: "100%", flexWrap: "wrap" }}>
@@ -488,14 +521,26 @@ export default function App() {
                 <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, fontFamily: "'DM Sans', sans-serif" }}>
                   {(matchInfo.addedTime1 || 0) > 0 && (() => {
                     const w = events.filter(e => e.wasting && e.half === "1st Half").reduce((a, e) => a + (e.duration || 0), 0);
-                    const pct = Math.round((w / ((matchInfo.addedTime1 || 0) * 60)) * 100);
-                    return <div style={{ textAlign: "center", marginBottom: (matchInfo.addedTime2 || 0) > 0 ? 6 : 0 }}><span style={{ fontSize: 13, color: "#ffa502" }}>1st Half: +{matchInfo.addedTime1} min added</span><span style={{ fontSize: 13, color: "#888" }}> · </span><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted ({pct}%)</span></div>;
+                    return <div style={{ textAlign: "center", marginBottom: (matchInfo.addedTime2 || 0) > 0 ? 6 : 0 }}><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted in 1st Half</span><span style={{ fontSize: 13, color: "#888" }}> but only </span><span style={{ fontSize: 13, color: "#ffa502", fontWeight: 700 }}>+{matchInfo.addedTime1} min added</span></div>;
                   })()}
                   {(matchInfo.addedTime2 || 0) > 0 && (() => {
                     const w = events.filter(e => e.wasting && e.half === "2nd Half").reduce((a, e) => a + (e.duration || 0), 0);
-                    const pct = Math.round((w / ((matchInfo.addedTime2 || 0) * 60)) * 100);
-                    return <div style={{ textAlign: "center" }}><span style={{ fontSize: 13, color: "#ffa502" }}>2nd Half: +{matchInfo.addedTime2} min added</span><span style={{ fontSize: 13, color: "#888" }}> · </span><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted ({pct}%)</span></div>;
+                    return <div style={{ textAlign: "center" }}><span style={{ fontSize: 13, color: "#ccc", fontWeight: 700 }}>{formatTime(w)} wasted in 2nd Half</span><span style={{ fontSize: 13, color: "#888" }}> but only </span><span style={{ fontSize: 13, color: "#ffa502", fontWeight: 700 }}>+{matchInfo.addedTime2} min added</span></div>;
                   })()}
+                </div>
+              )}
+              {goalTimeline.length > 0 && (
+                <div style={{ background: "#0a0a0f", borderRadius: 12, padding: "12px 16px", marginBottom: 24, fontFamily: "'DM Sans', sans-serif" }}>
+                  <div style={{ fontSize: 11, color: "#555", letterSpacing: 1, marginBottom: 8 }}>GOALS & TIME WASTING</div>
+                  {goalTimeline.map((g, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: i < goalTimeline.length - 1 ? 6 : 0, fontSize: 13 }}>
+                      <span>⚽</span>
+                      <span style={{ color: g.team === "home" ? "#00ff87" : "#ff4757", fontWeight: 700 }}>{g.teamName}</span>
+                      <span style={{ color: "#ccc" }}>{g.scoreLine}</span>
+                      {g.minuteDisplay != null && <span style={{ color: "#888" }}>({g.minuteDisplay}')</span>}
+                      {g.wastedAfter > 0 && <span style={{ color: "#ffa502", marginLeft: "auto" }}>{formatTime(g.wastedAfter)} wasted after</span>}
+                    </div>
+                  ))}
                 </div>
               )}
               {totalOther > 0 && (
@@ -563,7 +608,7 @@ export default function App() {
               📊 EXPORT CSV
             </button>
 
-            <button onClick={() => { if (events.length > 0 && !confirm("Reset all data and start a new match?")) return; if (events.length > 0) setMatchHistory(prev => [{ matchInfo, events, date: new Date().toISOString() }, ...prev]); setEvents([]); setTimers({}); setHistory([]); setFuture([]); setMatchClock(null); setMatchElapsed(0); setMatchInfo({ home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0 }); setView("tracker"); }} style={{ width: "100%", background: "transparent", border: "1px solid #ff4757", borderRadius: 10, padding: "12px", color: "#ff4757", fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600, marginTop: 10 }}>
+            <button onClick={() => { if (events.length > 0 && !confirm("Reset all data and start a new match?")) return; if (events.length > 0) setMatchHistory(prev => [{ matchInfo, events, date: new Date().toISOString() }, ...prev]); setEvents([]); setTimers({}); setHistory([]); setFuture([]); setMatchClock(null); setMatchElapsed(0); setMatchInfo({ home: "HOME", away: "AWAY", half: "1st Half", addedTime1: 0, addedTime2: 0, goals: [] }); setView("tracker"); }} style={{ width: "100%", background: "transparent", border: "1px solid #ff4757", borderRadius: 10, padding: "12px", color: "#ff4757", fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 600, marginTop: 10 }}>
               🗑 Reset & New Match
             </button>
           </>
